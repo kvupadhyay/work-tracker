@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Work Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;color:#1a1a1a;background:#f5f5f2;padding:1.5rem}
+.wt-wrap{max-width:1200px;margin:0 auto}
+.wt-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:12px}
+.wt-title{font-size:20px;font-weight:600;color:#1a1a1a}
+.wt-subtitle{font-size:11px;color:#888780;margin-top:2px}
+.header-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.wt-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem}
+.stat{background:#fff;border-radius:8px;padding:14px 16px;border:0.5px solid #e0ddd4;cursor:pointer;transition:box-shadow .15s}
+.stat:hover{box-shadow:0 1px 6px rgba(0,0,0,.08)}
+.stat.active{border-color:#185FA5;box-shadow:0 0 0 1.5px #185FA5}
+.stat-label{font-size:12px;color:#888780;margin-bottom:4px}
+.stat-val{font-size:24px;font-weight:600}
+.stat-val.c-blue{color:#185FA5}.stat-val.c-amber{color:#BA7517}.stat-val.c-green{color:#3B6D11}.stat-val.c-orange{color:#854F0B}
+.toolbar{display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.toolbar input[type=text]{flex:1;min-width:160px;font-size:13px;height:36px;padding:0 10px;border:0.5px solid #c4c2b9;border-radius:8px;background:#fff;color:#1a1a1a}
+.toolbar select{font-size:13px;padding:0 8px;height:36px;border:0.5px solid #c4c2b9;border-radius:8px;background:#fff;color:#1a1a1a;cursor:pointer}
+.btn{padding:0 14px;height:36px;font-size:13px;border:0.5px solid #c4c2b9;border-radius:8px;background:#fff;color:#1a1a1a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:#f1efe8}
+.btn.primary{background:#e6f1fb;color:#185FA5;border-color:transparent;font-weight:500}
+.btn.primary:hover{background:#b5d4f4}
+.btn.amber{background:#faeeda;color:#854F0B;border-color:transparent;font-weight:500}
+.btn.amber:hover{background:#fac775}
+.btn.green{background:#eaf3de;color:#3B6D11;border-color:transparent;font-weight:500}
+.btn.green:hover{background:#c0dd97}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.upload-label{padding:0 14px;height:36px;font-size:13px;border:0.5px solid #c4c2b9;border-radius:8px;background:#fff;color:#1a1a1a;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.upload-label:hover{background:#f1efe8}
+#uploadInput{display:none}
+.conn-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:1rem;border:0.5px solid;line-height:1.5}
+.conn-bar.connected{background:#eaf3de;border-color:#c0dd97;color:#3B6D11}
+.conn-bar.disconnected{background:#faeeda;border-color:#fac775;color:#854F0B}
+.conn-bar.error{background:#fcebeb;border-color:#f09595;color:#A32D2D}
+.conn-bar.loading{background:#e6f1fb;border-color:#85b7eb;color:#185FA5}
+.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.conn-bar.connected .conn-dot{background:#3B6D11}
+.conn-bar.disconnected .conn-dot{background:#854F0B}
+.conn-bar.error .conn-dot{background:#A32D2D}
+.conn-bar.loading .conn-dot{background:#185FA5;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.setup-panel{background:#fff;border:0.5px solid #d3d1c7;border-radius:12px;padding:1.25rem 1.5rem;margin-bottom:1.25rem}
+.setup-panel h3{font-size:13px;font-weight:600;margin-bottom:10px;color:#1a1a1a}
+.setup-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.setup-row input{flex:1;min-width:260px;font-size:12px;padding:8px 10px;border:0.5px solid #c4c2b9;border-radius:8px;color:#1a1a1a;background:#fff;font-family:monospace}
+.setup-hint{font-size:11px;color:#888780;margin-top:8px;line-height:1.7}
+.setup-hint b{color:#1a1a1a}
+.diag-box{background:#f1efe8;border:0.5px solid #d3d1c7;border-radius:8px;padding:10px 14px;margin-top:10px;font-size:11px;color:#444;line-height:1.8;display:none}
+.diag-box.show{display:block}
+.table-wrap{border:0.5px solid #d3d1c7;border-radius:12px;overflow:hidden;background:#fff}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+th{background:#f1efe8;padding:10px 12px;text-align:left;font-weight:600;font-size:12px;color:#888780;border-bottom:0.5px solid #d3d1c7;white-space:nowrap;user-select:none}
+th.sortable{cursor:pointer}
+th.sortable:hover{background:#e8e5dc;color:#1a1a1a}
+th.sort-asc,th.sort-desc{background:#e0ddd4;color:#1a1a1a}
+.sort-icon{display:inline-block;margin-left:4px;font-size:10px;opacity:.5}
+th.sort-asc .sort-icon,th.sort-desc .sort-icon{opacity:1}
+td{padding:10px 12px;border-bottom:0.5px solid #e8e6df;vertical-align:middle;word-break:break-word}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafaf7}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;white-space:normal;line-height:1.4}
+.badge.pending{background:#FAEEDA;color:#854F0B}
+.badge.inprogress{background:#E6F1FB;color:#185FA5}
+.badge.done{background:#EAF3DE;color:#3B6D11}
+.badge.blocked{background:#FCEBEB;color:#A32D2D}
+.badge.review{background:#EEEDFE;color:#534AB7}
+.badge.na{background:#f1efe8;color:#888780}
+.p-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500;white-space:nowrap}
+.p-high{background:#FCEBEC;color:#A32D2D}
+.p-med{background:#FAEEDA;color:#854F0B}
+.p-low{background:#EAF3DE;color:#3B6D11}
+.action-btns{display:flex;gap:6px}
+.icon-btn{border:none;background:none;cursor:pointer;color:#888780;font-size:14px;padding:4px 6px;border-radius:4px}
+.icon-btn:hover{background:#f1efe8;color:#1a1a1a}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:12px;border:0.5px solid #d3d1c7;padding:1.5rem;width:min(520px,95vw);max-height:90vh;overflow-y:auto}
+.modal h2{font-size:16px;font-weight:600;margin-bottom:1.25rem;color:#1a1a1a}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-full{grid-column:1/-1}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group label{font-size:12px;color:#888780;font-weight:500}
+.form-group input,.form-group select,.form-group textarea{font-size:13px;padding:8px 10px;border:0.5px solid #c4c2b9;border-radius:8px;background:#fff;color:#1a1a1a}
+.form-group textarea{resize:vertical;min-height:70px}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:1.25rem}
+.sno{color:#888780;font-size:12px;font-weight:500}
+.empty{text-align:center;padding:2.5rem;color:#888780;font-size:13px}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid #c4c2b9;border-top-color:#185FA5;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#2c2c2a;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:999;opacity:0;transition:opacity 0.3s;pointer-events:none;max-width:380px;line-height:1.5}
+.toast.show{opacity:1}
+@media(max-width:700px){.wt-stats{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:1fr}.header-btns{width:100%}}
+</style>
+</head>
+<body>
+<div class="wt-wrap">
+
+  <div class="wt-header">
+    <div>
+      <div class="wt-title">Work Tracker</div>
+      <div class="wt-subtitle" id="lastSync">Not synced yet</div>
+    </div>
+    <div class="header-btns">
+      <button class="btn green" id="btnRefresh" onclick="loadFromSheet()">&#8635; Refresh</button>
+      <label class="upload-label">&#8679; Upload Excel
+        <input type="file" id="uploadInput" accept=".xlsx,.xls" onchange="importExcel(event)">
+      </label>
+      <button class="btn amber" onclick="exportExcel()">&#8681; Export Excel</button>
+      <button class="btn primary" onclick="openModal()">+ Add Work Item</button>
+    </div>
+  </div>
+
+  <div class="conn-bar disconnected" id="connBar">
+    <span class="conn-dot"></span>
+    <span id="connMsg">Not connected. Enter your Apps Script URL below.</span>
+  </div>
+
+  <div class="setup-panel" id="setupPanel">
+    <h3>&#9881; Google Sheets Connection</h3>
+    <div class="setup-row">
+      <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/xxxxxxxxxx/exec">
+      <button class="btn primary" onclick="saveAndConnect()">Connect</button>
+      <button class="btn" onclick="runDiagnostic()">&#128270; Test URL</button>
+      <button class="btn" onclick="clearUrl()" style="color:#A32D2D">Clear</button>
+    </div>
+    <div class="setup-hint">
+      <b>Where to find this URL:</b> Google Sheet → Extensions → Apps Script → Deploy → Manage Deployments → copy the Web App URL.<br>
+      <b>Deploy settings must be:</b> Execute as = <b>Me</b> &nbsp;|&nbsp; Who has access = <b>Anyone</b><br>
+      After ANY code change you must create a <b>New Version</b> in Manage Deployments.
+    </div>
+    <div class="diag-box" id="diagBox"></div>
+  </div>
+
+  <div class="wt-stats" id="stats"></div>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Search tasks, remarks..." oninput="render()">
+    <select id="fStatus" onchange="render()">
+      <option value="">All Status</option>
+      <option>Pending</option><option>In Progress</option><option>Review</option><option>Done</option><option>Blocked</option>
+    </select>
+    <select id="fPrio" onchange="render()">
+      <option value="">All Priority</option>
+      <option>High</option><option>Medium</option><option>Low</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:5%" class="sortable" onclick="colSort('sno')">S.No.<span class="sort-icon" id="si-sno">&#8593;</span></th>
+          <th style="width:29%" class="sortable" onclick="colSort('work')">Task<span class="sort-icon" id="si-work">&#8597;</span></th>
+          <th style="width:10%" class="sortable" onclick="colSort('priority')">Priority<span class="sort-icon" id="si-priority">&#8597;</span></th>
+          <th style="width:13%" class="sortable" onclick="colSort('status')">Status<span class="sort-icon" id="si-status">&#8597;</span></th>
+          <th style="width:11%" class="sortable" onclick="colSort('assigned')">Assigned To<span class="sort-icon" id="si-assigned">&#8597;</span></th>
+          <th style="width:9%" class="sortable" onclick="colSort('due')">Due Date<span class="sort-icon" id="si-due">&#8597;</span></th>
+          <th style="width:18%">Remarks</th>
+          <th style="width:5%">Act</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="8"><div class="empty">Connect to Google Sheets above, or upload an Excel file.</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2 id="modalTitle">Add Work Item</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>S.No.</label>
+        <input type="number" id="fSno" min="1">
+      </div>
+      <div class="form-group form-full">
+        <label>Task</label>
+        <textarea id="fWork" rows="2" placeholder="Describe the task"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <select id="fPriority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="fStat"><option>Pending</option><option>In Progress</option><option>Review</option><option>Done</option><option>Blocked</option></select>
+      </div>
+      <div class="form-group">
+        <label>Assigned To</label>
+        <input type="text" id="fAssign" placeholder="Name / Team">
+      </div>
+      <div class="form-group">
+        <label>Due Date</label>
+        <input type="date" id="fDue">
+      </div>
+      <div class="form-group form-full">
+        <label>Remarks / Notes</label>
+        <textarea id="fRemarks" placeholder="Any notes, blockers, or updates..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" id="btnSave" onclick="saveItem()">Save Item</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY='wt_items_v5';
+const URL_KEY='wt_url_v3';
+let items=[];
+let editId=null;
+let sortCol='sno',sortDir=1;
+
+const PRIO_ORDER={High:0,Medium:1,Low:2};
+const STATUS_ORDER={Blocked:0,'In Progress':1,Review:2,Pending:3,Done:4};
+
+function getUrl(){return(localStorage.getItem(URL_KEY)||'').trim();}
+function statusClass(s){return{Pending:'pending','In Progress':'inprogress',Done:'done',Blocked:'blocked',Review:'review'}[s]||'na';}
+function prioClass(p){return{High:'p-high',Medium:'p-med',Low:'p-low'}[p]||'p-med';}
+function formatDate(d){if(!d||d==='—')return'—';try{const[y,m,day]=d.split('-');return`${day}/${m}/${y.slice(2)}`;}catch(e){return d;}}
+function nowStr(){return new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+function todayStr(){const d=new Date();return String(d.getDate()).padStart(2,'0')+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+d.getFullYear();}
+
+function showToast(msg,dur=3500){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),dur);
+}
+function setConn(state,msg){
+  const b=document.getElementById('connBar');
+  b.className='conn-bar '+state;
+  document.getElementById('connMsg').textContent=msg;
+}
+
+// ── URL management ─────────────────────────────────────────
+function saveAndConnect(){
+  const url=document.getElementById('scriptUrl').value.trim();
+  if(!url){showToast('Please paste your Apps Script Web App URL.');return;}
+  if(!url.includes('script.google.com')){
+    showToast('URL must be from script.google.com — check you copied the correct link.');return;
+  }
+  if(!url.endsWith('/exec')&&!url.includes('/exec?')){
+    showToast('URL must end with /exec — check your deployment URL.');return;
+  }
+  localStorage.setItem(URL_KEY,url);
+  document.getElementById('setupPanel').style.display='none';
+  loadFromSheet();
+}
+
+function clearUrl(){
+  if(!confirm('Clear the saved URL? You will need to re-enter it.'))return;
+  localStorage.removeItem(URL_KEY);
+  document.getElementById('scriptUrl').value='';
+  document.getElementById('setupPanel').style.display='block';
+  document.getElementById('diagBox').classList.remove('show');
+  setConn('disconnected','Not connected. Enter your Apps Script URL above.');
+}
+
+// ── Diagnostic test ────────────────────────────────────────
+async function runDiagnostic(){
+  const url=document.getElementById('scriptUrl').value.trim();
+  const box=document.getElementById('diagBox');
+  box.classList.add('show');
+  box.innerHTML='<span class="spinner"></span> Testing URL...';
+
+  if(!url){box.innerHTML='&#10060; No URL entered.';return;}
+  if(!url.includes('script.google.com')){box.innerHTML='&#10060; URL does not look like an Apps Script URL. It must contain script.google.com';return;}
+  if(!url.endsWith('/exec')&&!url.includes('/exec?')){box.innerHTML='&#10060; URL must end with <b>/exec</b>. Check your deployment.';return;}
+
+  box.innerHTML='&#128270; Checking URL format... OK<br>&#128270; Attempting to fetch data...';
+
+  try{
+    // Try fetch with no-cors first just to see if URL is reachable
+    const testUrl=url+(url.includes('?')?'&':'?')+'action=getAll&t='+Date.now();
+    const res=await fetch(testUrl,{method:'GET',mode:'cors'});
+    const text=await res.text();
+    if(text.startsWith('{')||text.startsWith('[')){
+      const data=JSON.parse(text);
+      if(data.success){
+        box.innerHTML='&#9989; <b>Connection successful!</b> Found '+data.rows.length+' rows. Click Connect to load data.';
+        box.style.background='#eaf3de';
+      } else {
+        box.innerHTML='&#10060; Script returned error: '+(data.error||'Unknown error')+'<br>Check your Apps Script code.';
+      }
+    } else if(text.includes('<!DOCTYPE')||text.includes('<html')){
+      box.innerHTML='&#10060; Got a HTML page instead of data — this usually means:<br>1. You are not logged into Google, OR<br>2. Access is not set to <b>Anyone</b> (set it to Anyone, not "Anyone with Google account")<br>3. You need to re-deploy after code changes.';
+    } else {
+      box.innerHTML='&#9888; Unexpected response: '+text.substring(0,200);
+    }
+  }catch(err){
+    if(err.message.includes('Failed to fetch')||err.message.includes('NetworkError')){
+      box.innerHTML='&#10060; <b>CORS blocked</b> — This is normal when opening the HTML as a local file.<br><br>'+
+        '&#9989; <b>Solution:</b> Open the URL directly in your browser tab and check if it shows JSON data like <code>{"success":true,"rows":[...]}</code><br><br>'+
+        'If it shows JSON → your script is working. The issue is only when loading from a local HTML file.<br>'+
+        'In that case, use the <b>Upload Excel</b> button as an alternative, OR host this HTML file on a web server.';
+    } else {
+      box.innerHTML='&#10060; Error: '+err.message;
+    }
+  }
+}
+
+// ── Fetch from Google Sheets ───────────────────────────────
+// Strategy: try fetch with cors, fallback to no-cors iframe trick
+async function loadFromSheet(){
+  const url=getUrl();
+  if(!url){
+    setConn('disconnected','Not connected. Enter your Apps Script URL above.');
+    document.getElementById('setupPanel').style.display='block';
+    return;
+  }
+  setConn('loading','Connecting to Google Sheets...');
+  document.getElementById('btnRefresh').disabled=true;
+  document.getElementById('tbody').innerHTML='<tr><td colspan="8"><div class="empty"><span class="spinner"></span> Loading from Google Sheets...</div></td></tr>';
+
+  const fetchUrl=url+(url.includes('?')?'&':'?')+'action=getAll&t='+Date.now();
+
+  try{
+    const res=await fetch(fetchUrl,{method:'GET',mode:'cors',cache:'no-store'});
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}
+    catch(pe){
+      // If HTML returned (auth page)
+      if(text.includes('<!DOCTYPE')||text.includes('<html')){
+        throw new Error('Got login page — set deployment access to "Anyone" (not "Anyone with Google account")');
+      }
+      throw new Error('Invalid response from script: '+text.substring(0,100));
+    }
+    if(!data.success){throw new Error(data.error||'Script returned success:false');}
+    processRows(data.rows||[]);
+
+  }catch(err){
+    // CORS error from local file — very common
+    const isCors=err.message.includes('Failed to fetch')||err.message.includes('NetworkError')||err.message.includes('CORS');
+    if(isCors){
+      setConn('error',
+        'CORS blocked — your script is working, but browsers block local HTML files from calling external APIs. '+
+        'Solution: Open the URL in your browser first to confirm it works, then use "Upload Excel" to load data. '+
+        'Or click "Test URL" below for details.');
+      document.getElementById('setupPanel').style.display='block';
+      // Show cached data if available
+      const cached=localStorage.getItem(STORAGE_KEY);
+      if(cached){
+        items=JSON.parse(cached);render();
+        showToast('Showing last cached data. Direct sync blocked by browser security.',5000);
+      } else {
+        document.getElementById('tbody').innerHTML='<tr><td colspan="8"><div class="empty">Cannot fetch data directly from a local HTML file due to browser security (CORS).<br>Please use <b>Upload Excel</b> to load your data, or host this file on a server.</div></td></tr>';
+      }
+    } else {
+      setConn('error','Error: '+err.message);
+      showToast('Could not load data: '+err.message,5000);
+    }
+  }
+  document.getElementById('btnRefresh').disabled=false;
+}
+
+function processRows(rows){
+  items=rows.map((r,i)=>({
+    id:r.id||(Date.now()+'_'+i),
+    sno:parseInt(r.sno)||i+1,
+    work:r.work||'',
+    priority:r.priority||'Medium',
+    status:r.status||'Pending',
+    assigned:r.assigned||'',
+    due:r.due||'',
+    remarks:r.remarks||''
+  }));
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(items));
+  setConn('connected','Connected to Google Sheets — Last synced: '+nowStr());
+  document.getElementById('lastSync').textContent='Last synced: '+nowStr();
+  document.getElementById('setupPanel').style.display='none';
+  render();
+  showToast('Loaded '+items.length+' items from Google Sheets.');
+}
+
+// ── POST to sheet ──────────────────────────────────────────
+async function postToSheet(payload){
+  const url=getUrl();if(!url)return false;
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(payload)
+    });
+    const data=await res.json();
+    return data.success!==false;
+  }catch(err){
+    console.warn('POST failed:',err.message);
+    return false;
+  }
+}
+
+// ── Sort ───────────────────────────────────────────────────
+function colSort(col){
+  sortDir=sortCol===col?sortDir*-1:1;sortCol=col;
+  document.querySelectorAll('th.sortable').forEach(t=>t.classList.remove('sort-asc','sort-desc'));
+  document.querySelectorAll('.sort-icon').forEach(s=>s.innerHTML='&#8597;');
+  const th=document.querySelector(`[onclick="colSort('${col}')"]`);
+  if(th){th.classList.add(sortDir===1?'sort-asc':'sort-desc');th.querySelector('.sort-icon').innerHTML=sortDir===1?'&#8593;':'&#8595;';}
+  render();
+}
+function applySort(list){
+  return list.sort((a,b)=>{
+    if(sortCol==='priority')return((PRIO_ORDER[a.priority]??9)-(PRIO_ORDER[b.priority]??9))*sortDir;
+    if(sortCol==='status')return((STATUS_ORDER[a.status]??9)-(STATUS_ORDER[b.status]??9))*sortDir;
+    if(sortCol==='sno')return((a.sno||999)-(b.sno||999))*sortDir;
+    if(sortCol==='due'){const av=a.due||'9999',bv=b.due||'9999';return(av<bv?-1:av>bv?1:0)*sortDir;}
+    const av=String(a[sortCol]||'').toLowerCase(),bv=String(b[sortCol]||'').toLowerCase();
+    return(av<bv?-1:av>bv?1:0)*sortDir;
+  });
+}
+
+// ── Stat filter ────────────────────────────────────────────
+function statClick(s){const sel=document.getElementById('fStatus');sel.value=sel.value===s?'':s;render();}
+
+// ── Render ─────────────────────────────────────────────────
+function renderStats(){
+  const total=items.length,inprog=items.filter(i=>i.status==='In Progress').length,
+    done=items.filter(i=>i.status==='Done').length,pend=items.filter(i=>i.status==='Pending').length;
+  const af=document.getElementById('fStatus').value;
+  document.getElementById('stats').innerHTML=`
+    <div class="stat${af===''?' active':''}" onclick="statClick('')"><div class="stat-label">Total Items</div><div class="stat-val c-blue">${total}</div></div>
+    <div class="stat${af==='In Progress'?' active':''}" onclick="statClick('In Progress')"><div class="stat-label">In Progress</div><div class="stat-val c-amber">${inprog}</div></div>
+    <div class="stat${af==='Done'?' active':''}" onclick="statClick('Done')"><div class="stat-label">Completed</div><div class="stat-val c-green">${done}</div></div>
+    <div class="stat${af==='Pending'?' active':''}" onclick="statClick('Pending')"><div class="stat-label">Pending</div><div class="stat-val c-orange">${pend}</div></div>`;
+}
+function render(){
+  renderStats();
+  const q=document.getElementById('search').value.toLowerCase();
+  const fS=document.getElementById('fStatus').value,fP=document.getElementById('fPrio').value;
+  let list=[...items];
+  if(q)list=list.filter(i=>(i.work+i.remarks+i.assigned).toLowerCase().includes(q));
+  if(fS)list=list.filter(i=>i.status===fS);
+  if(fP)list=list.filter(i=>i.priority===fP);
+  list=applySort(list);
+  const tbody=document.getElementById('tbody');
+  if(!list.length){tbody.innerHTML=`<tr><td colspan="8"><div class="empty">${items.length?'No items match the filter.':'No data. Connect to Google Sheets or upload an Excel file.'}</div></td></tr>`;return;}
+  tbody.innerHTML=list.map(i=>`
+    <tr>
+      <td class="sno" style="text-align:center">${i.sno||'—'}</td>
+      <td style="font-weight:500">${i.work}</td>
+      <td><span class="p-badge ${prioClass(i.priority)}">${i.priority}</span></td>
+      <td><span class="badge ${statusClass(i.status)}">${i.status}</span></td>
+      <td style="color:#888780;font-size:12px">${i.assigned||'—'}</td>
+      <td style="color:#888780;font-size:12px">${formatDate(i.due)}</td>
+      <td style="color:#888780;font-size:12px">${i.remarks||'—'}</td>
+      <td><div class="action-btns">
+        <button class="icon-btn" title="Edit" onclick="editItem('${i.id}')">&#9998;</button>
+        <button class="icon-btn" title="Delete" onclick="deleteItem('${i.id}')">&#10005;</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+// ── Modal ──────────────────────────────────────────────────
+function openModal(id=null){
+  editId=id;
+  document.getElementById('modalTitle').textContent=id?'Edit Work Item':'Add Work Item';
+  if(id){
+    const i=items.find(x=>String(x.id)===String(id));if(!i)return;
+    document.getElementById('fSno').value=i.sno||'';
+    document.getElementById('fWork').value=i.work;
+    document.getElementById('fPriority').value=i.priority;
+    document.getElementById('fStat').value=i.status;
+    document.getElementById('fAssign').value=i.assigned;
+    document.getElementById('fDue').value=i.due;
+    document.getElementById('fRemarks').value=i.remarks;
+  }else{
+    const mx=items.length?Math.max(...items.map(x=>x.sno||0))+1:1;
+    document.getElementById('fSno').value=mx;
+    ['fWork','fAssign','fDue','fRemarks'].forEach(f=>document.getElementById(f).value='');
+    document.getElementById('fPriority').value='Medium';
+    document.getElementById('fStat').value='Pending';
+  }
+  document.getElementById('modalBg').classList.add('open');
+}
+function closeModal(){document.getElementById('modalBg').classList.remove('open');editId=null;}
+
+async function saveItem(){
+  const work=document.getElementById('fWork').value.trim();
+  if(!work){alert('Please enter a task.');return;}
+  const item={
+    id:editId||(Date.now()+''),
+    sno:parseInt(document.getElementById('fSno').value)||null,
+    work,
+    priority:document.getElementById('fPriority').value,
+    status:document.getElementById('fStat').value,
+    assigned:document.getElementById('fAssign').value.trim(),
+    due:document.getElementById('fDue').value,
+    remarks:document.getElementById('fRemarks').value.trim()
+  };
+  const btn=document.getElementById('btnSave');
+  btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Saving...';
+  if(editId){const idx=items.findIndex(x=>String(x.id)===String(editId));items[idx]=item;}
+  else items.push(item);
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(items));
+  closeModal();render();
+  const ok=await postToSheet({action:editId?'update':'add',item});
+  showToast(ok?(editId?'Updated & synced to Google Sheets.':'Added & synced to Google Sheets.'):'Saved locally only — could not sync to Google Sheets.');
+  btn.disabled=false;btn.innerHTML='Save Item';
+}
+function editItem(id){openModal(id);}
+async function deleteItem(id){
+  if(!confirm('Delete this item?'))return;
+  items=items.filter(x=>String(x.id)!==String(id));
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(items));render();
+  const ok=await postToSheet({action:'delete',id});
+  showToast(ok?'Deleted & synced.':'Deleted locally — could not sync to Google Sheets.');
+}
+
+// ── Export ─────────────────────────────────────────────────
+function exportExcel(){
+  const rows=[...items].sort((a,b)=>(a.sno||999)-(b.sno||999)).map(i=>({'S.No.':i.sno||'','Task':i.work||'','Priority':i.priority||'','Status':i.status||'','Assigned To':i.assigned||'','Due Date':formatDate(i.due),'Remarks':i.remarks||''}));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[{wch:6},{wch:52},{wch:10},{wch:14},{wch:16},{wch:11},{wch:42}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Work Tracker');
+  XLSX.writeFile(wb,'Work_Tracker_'+todayStr()+'.xlsx');
+  showToast('Exported: Work_Tracker_'+todayStr()+'.xlsx');
+}
+
+// ── Import ─────────────────────────────────────────────────
+function importExcel(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async function(e){
+    try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+      if(!rows.length){showToast('No data found in file.');return;}
+      const get=(r,names)=>{const keys=Object.keys(r);for(const n of names){const k=keys.find(k=>k.toLowerCase().replace(/[^a-z]/g,'').includes(n.toLowerCase().replace(/[^a-z]/g,'')));if(k!==undefined)return String(r[k]||'').trim();}return'';};
+      const mapped=rows.map((r,idx)=>{
+        let dueRaw=get(r,['due','date']),due='';
+        if(dueRaw){const p=dueRaw.split('/');if(p.length===3){const y=p[2].length===2?'20'+p[2]:p[2];due=`${y}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;}else due=dueRaw;}
+        const work=get(r,['task','work','item','description','title']);
+        if(!work)return null;
+        return{id:Date.now()+'_'+idx,sno:parseInt(get(r,['sno','sl','no','s.no']))||idx+1,work,priority:get(r,['priority'])||'Medium',status:get(r,['status'])||'Pending',assigned:get(r,['assigned','owner','person']),due,remarks:get(r,['remark','note','comment'])};
+      }).filter(Boolean);
+      if(!mapped.length){showToast('Could not read columns. Check headers.');return;}
+      if(!confirm('Import '+mapped.length+' items? This will replace current data.')){document.getElementById('uploadInput').value='';return;}
+      items=mapped;localStorage.setItem(STORAGE_KEY,JSON.stringify(items));render();
+      showToast('Imported '+mapped.length+' items. Syncing to Google Sheets...');
+      const ok=await postToSheet({action:'replaceAll',rows:mapped});
+      showToast(ok?'Synced to Google Sheets successfully.':'Imported locally. Google Sheets sync failed.');
+    }catch(err){showToast('Error reading file: '+err.message);}
+    document.getElementById('uploadInput').value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Init ───────────────────────────────────────────────────
+document.getElementById('modalBg').addEventListener('click',function(e){if(e.target===this)closeModal();});
+document.querySelector('[onclick="colSort(\'sno\')"]').classList.add('sort-asc');
+renderStats();
+
+const savedUrl=getUrl();
+if(savedUrl){
+  document.getElementById('scriptUrl').value=savedUrl;
+  document.getElementById('setupPanel').style.display='none';
+  const cached=localStorage.getItem(STORAGE_KEY);
+  if(cached){items=JSON.parse(cached);render();document.getElementById('lastSync').textContent='Cached — refreshing...';}
+  loadFromSheet();
+}else{
+  const cached=localStorage.getItem(STORAGE_KEY);
+  if(cached){items=JSON.parse(cached);}
+  render();
+}
+</script>
+</body>
+</html>
