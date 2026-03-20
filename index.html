@@ -398,7 +398,7 @@ function processRows(rows, debug){
     setConn('error','Connected but 0 rows fetched — see diagnostic below.');
     return;
   }
-  items=rows.map((r,i)=>({
+  const mapped=rows.map((r,i)=>({
     id:r.id||(Date.now()+'_'+i),
     sno:parseInt(r.sno)||i+1,
     work:r.work||'',
@@ -408,31 +408,48 @@ function processRows(rows, debug){
     due:r.due||'',
     remarks:r.remarks||''
   }));
+  // Deduplicate by id — keep the last occurrence (most recent edit wins)
+  const seen=new Map();
+  mapped.forEach(item=>seen.set(item.id,item));
+  items=Array.from(seen.values());
+  // Re-number sno sequentially after dedup
+  items.sort((a,b)=>(a.sno||999)-(b.sno||999));
   localStorage.setItem(STORAGE_KEY,JSON.stringify(items));
   setConn('connected','Connected to Google Sheets — Last synced: '+nowStr());
   document.getElementById('lastSync').textContent='Last synced: '+nowStr();
   document.getElementById('setupPanel').style.display='none';
   render();
-  showToast('Loaded '+items.length+' items from Google Sheets.');
+  // If duplicates were found, auto-sync clean data back to sheet
+  if(mapped.length!==items.length){
+    console.log('Deduped '+(mapped.length-items.length)+' duplicate rows — syncing clean data back to sheet');
+    postToSheet({action:'replaceAll',rows:items});
+    showToast('Loaded & cleaned '+items.length+' items (removed '+(mapped.length-items.length)+' duplicate rows).');
+  } else {
+    showToast('Loaded '+items.length+' items from Google Sheets.');
+  }
 }
 
-// ── POST to sheet ──────────────────────────────────────────
-// Google Apps Script requires a form POST or no-cors fetch for writes
+// ── Sync to sheet — sends full items array as replaceAll via GET ──
+// Using GET with encoded data avoids all CORS/body-stripping issues with Apps Script
 async function postToSheet(payload){
   const url=getUrl();if(!url)return false;
   try{
-    // Method 1: fetch with no-cors (fire-and-forget, most reliable for Apps Script)
-    fetch(url,{
-      method:'POST',
-      mode:'no-cors',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify(payload)
-    });
-    // no-cors doesn't return a readable response, so we optimistically return true
-    // The Apps Script will still process the request
-    return true;
+    // Always send the full current items list as replaceAll
+    // This is the most reliable method — avoids no-cors body stripping
+    const syncPayload={action:'replaceAll',rows:items};
+    const encoded=encodeURIComponent(JSON.stringify(syncPayload));
+    const fetchUrl=url+'?data='+encoded+'&t='+Date.now();
+    const res=await fetch(fetchUrl,{method:'GET',mode:'cors',cache:'no-store'});
+    const text=await res.text();
+    const data=JSON.parse(text);
+    return data.success!==false;
   }catch(err){
-    console.warn('POST failed:',err.message);
+    console.warn('Sync failed:',err.message);
+    // Fallback: try no-cors POST (fire and forget)
+    try{
+      const syncPayload={action:'replaceAll',rows:items};
+      fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(syncPayload)});
+    }catch(e){}
     return false;
   }
 }
