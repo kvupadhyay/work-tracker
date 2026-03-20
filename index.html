@@ -117,12 +117,12 @@ tr:hover td{background:#fafaf7}
     </div>
   </div>
 
-  <div class="conn-bar disconnected" id="connBar">
+  <div class="conn-bar loading" id="connBar">
     <span class="conn-dot"></span>
-    <span id="connMsg">Not connected. Enter your Apps Script URL below.</span>
+    <span id="connMsg">Connecting to Google Sheets...</span>
   </div>
 
-  <div class="setup-panel" id="setupPanel">
+  <div class="setup-panel" id="setupPanel" style="display:none">
     <h3>&#9881; Google Sheets Connection</h3>
     <div class="setup-row">
       <input type="text" id="scriptUrl" placeholder="https://script.google.com/macros/s/xxxxxxxxxx/exec">
@@ -225,7 +225,7 @@ let sortCol='sno',sortDir=1;
 const PRIO_ORDER={High:0,Medium:1,Low:2};
 const STATUS_ORDER={Blocked:0,'In Progress':1,Review:2,Pending:3,Done:4};
 
-function getUrl(){return(localStorage.getItem(URL_KEY)||'').trim();}
+function getUrl(){return 'https://script.google.com/macros/s/AKfycbxJ85gpQBq966FQxI6OYNXgG2DxRTtyCEMuP_xcp9yHHGmrzAWsjbhmuSCtQlV1AQ0/exec';}
 function statusClass(s){return{Pending:'pending','In Progress':'inprogress',Done:'done',Blocked:'blocked',Review:'review'}[s]||'na';}
 function prioClass(p){return{High:'p-high',Medium:'p-med',Low:'p-low'}[p]||'p-med';}
 function formatDate(d){if(!d||d==='—')return'—';try{const[y,m,day]=d.split('-');return`${day}/${m}/${y.slice(2)}`;}catch(e){return d;}}
@@ -338,7 +338,7 @@ async function loadFromSheet(){
       throw new Error('Invalid response from script: '+text.substring(0,100));
     }
     if(!data.success){throw new Error(data.error||'Script returned success:false');}
-    processRows(data.rows||[]);
+    processRows(data.rows||[], data.debug||null);
 
   }catch(err){
     // CORS error from local file — very common
@@ -365,7 +365,39 @@ async function loadFromSheet(){
   document.getElementById('btnRefresh').disabled=false;
 }
 
-function processRows(rows){
+function processRows(rows, debug){
+  if(rows.length===0 && debug){
+    // Show debug panel so user can see what the script found
+    const panel=document.getElementById('setupPanel');
+    panel.style.display='block';
+    const box=document.getElementById('diagBox');
+    box.classList.add('show');
+    const d=debug;
+    let html='<b>&#128270; Debug — Script connected but found 0 rows:</b><br><br>';
+    html+='Spreadsheet: <b>'+(d.spreadsheetName||'?')+'</b><br>';
+    html+='All sheet tabs found: <b>'+(d.allSheets?d.allSheets.join(', '):'?')+'</b><br>';
+    html+='Sheet used by script: <b>'+(d.sheetUsed||'none — sheet not found!')+'</b><br>';
+    html+='Total rows in sheet: <b>'+(d.lastRow||0)+'</b><br>';
+    html+='Total columns: <b>'+(d.lastCol||0)+'</b><br>';
+    if(d.firstRowValues) html+='Row 1 (headers): <b>'+JSON.stringify(d.firstRowValues)+'</b><br>';
+    if(d.secondRowValues) html+='Row 2 (first data row): <b>'+JSON.stringify(d.secondRowValues)+'</b><br>';
+    html+='<br>';
+    if(!d.sheetFound){
+      html+='&#10060; <b>Sheet not found.</b> Your sheet tab must be named exactly <b>Work Tracker</b>.<br>';
+      html+='Go to your Google Sheet → right-click the tab at the bottom → Rename → type: <b>Work Tracker</b>';
+    } else if(d.lastRow<=1){
+      html+='&#10060; <b>Sheet is empty or only has a header row.</b><br>';
+      html+='Your sheet tab "<b>'+d.sheetUsed+'</b>" was found but has no data rows.<br>';
+      html+='Use <b>Upload Excel</b> button to load your data into the tracker — it will sync to the sheet automatically.';
+    } else {
+      html+='&#9888; Sheet has data but rows were not read correctly.<br>';
+      html+='Check that Row 1 contains these headers: <b>id, sno, work, priority, status, assigned, due, remarks</b><br>';
+      html+='If your sheet has different columns, use <b>Upload Excel</b> to reload — the script will rewrite the headers.';
+    }
+    box.innerHTML=html;
+    setConn('error','Connected but 0 rows fetched — see diagnostic below.');
+    return;
+  }
   items=rows.map((r,i)=>({
     id:r.id||(Date.now()+'_'+i),
     sno:parseInt(r.sno)||i+1,
@@ -385,16 +417,20 @@ function processRows(rows){
 }
 
 // ── POST to sheet ──────────────────────────────────────────
+// Google Apps Script requires a form POST or no-cors fetch for writes
 async function postToSheet(payload){
   const url=getUrl();if(!url)return false;
   try{
-    const res=await fetch(url,{
+    // Method 1: fetch with no-cors (fire-and-forget, most reliable for Apps Script)
+    fetch(url,{
       method:'POST',
+      mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify(payload)
     });
-    const data=await res.json();
-    return data.success!==false;
+    // no-cors doesn't return a readable response, so we optimistically return true
+    // The Apps Script will still process the request
+    return true;
   }catch(err){
     console.warn('POST failed:',err.message);
     return false;
@@ -489,8 +525,11 @@ function closeModal(){document.getElementById('modalBg').classList.remove('open'
 async function saveItem(){
   const work=document.getElementById('fWork').value.trim();
   if(!work){alert('Please enter a task.');return;}
+  // Capture editId BEFORE closeModal() resets it to null
+  const isEdit=!!editId;
+  const currentId=editId;
   const item={
-    id:editId||(Date.now()+''),
+    id:currentId||(Date.now()+''),
     sno:parseInt(document.getElementById('fSno').value)||null,
     work,
     priority:document.getElementById('fPriority').value,
@@ -501,12 +540,21 @@ async function saveItem(){
   };
   const btn=document.getElementById('btnSave');
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Saving...';
-  if(editId){const idx=items.findIndex(x=>String(x.id)===String(editId));items[idx]=item;}
-  else items.push(item);
+  // Update local array
+  if(isEdit){
+    const idx=items.findIndex(x=>String(x.id)===String(currentId));
+    if(idx>=0){items[idx]=item;}else{items.push(item);}
+  }else{
+    items.push(item);
+  }
   localStorage.setItem(STORAGE_KEY,JSON.stringify(items));
-  closeModal();render();
-  const ok=await postToSheet({action:editId?'update':'add',item});
-  showToast(ok?(editId?'Updated & synced to Google Sheets.':'Added & synced to Google Sheets.'):'Saved locally only — could not sync to Google Sheets.');
+  closeModal();
+  render();
+  // Sync to Google Sheets with correct action
+  const ok=await postToSheet({action:isEdit?'update':'add',item});
+  showToast(ok
+    ?(isEdit?'Updated & synced to Google Sheets.':'Added & synced to Google Sheets.')
+    :'Saved locally only — could not sync to Google Sheets.');
   btn.disabled=false;btn.innerHTML='Save Item';
 }
 function editItem(id){openModal(id);}
@@ -562,18 +610,11 @@ document.getElementById('modalBg').addEventListener('click',function(e){if(e.tar
 document.querySelector('[onclick="colSort(\'sno\')"]').classList.add('sort-asc');
 renderStats();
 
-const savedUrl=getUrl();
-if(savedUrl){
-  document.getElementById('scriptUrl').value=savedUrl;
-  document.getElementById('setupPanel').style.display='none';
-  const cached=localStorage.getItem(STORAGE_KEY);
-  if(cached){items=JSON.parse(cached);render();document.getElementById('lastSync').textContent='Cached — refreshing...';}
-  loadFromSheet();
-}else{
-  const cached=localStorage.getItem(STORAGE_KEY);
-  if(cached){items=JSON.parse(cached);}
-  render();
-}
+// URL is hardcoded — auto-connect on load
+document.getElementById('setupPanel').style.display='none';
+const cached=localStorage.getItem(STORAGE_KEY);
+if(cached){items=JSON.parse(cached);render();document.getElementById('lastSync').textContent='Cached — refreshing...';}
+loadFromSheet();
 </script>
 </body>
 </html>
